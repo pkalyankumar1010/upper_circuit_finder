@@ -47,9 +47,40 @@ jobs:
       - name: Commit and push CSV files
         if: always()  # Run even if previous step fails
         run: |
-          git config --local user.email "github-actions[bot]@users.noreply.github.com"
-          git config --local user.name "github-actions[bot]"
-          git add csv/*.csv || echo "No CSV files to add"
-          git diff --staged --quiet && echo "No changes to commit" || (git commit -m "Auto-update: Add upper circuit stocks CSV [skip ci]" && git push) || echo "Push failed or no changes"
+          echo "Checking for CSV files to commit..."
+          
+          # Create csv directory if it doesn't exist (should already exist from script)
+          mkdir -p csv
+          
+          # List CSV files
+          echo "CSV files in csv/ directory:"
+          ls -la csv/*.csv 2>/dev/null || echo "No CSV files found"
+          
+          # Check if any CSV files exist
+          if [ -n "$(ls -A csv/*.csv 2>/dev/null)" ]; then
+            echo "Found CSV files, preparing to commit..."
+            
+            # Configure git
+            git config --local user.email "github-actions[bot]@users.noreply.github.com"
+            git config --local user.name "github-actions[bot]"
+            
+            # Add all CSV files
+            git add csv/*.csv
+            
+            # Check if there are changes to commit
+            if git diff --staged --quiet; then
+              echo "No changes to commit (files already committed)"
+            else
+              echo "Committing CSV files..."
+              git commit -m "Auto-update: Add upper circuit stocks CSV [skip ci]"
+              
+              echo "Pushing to repository..."
+              git push origin HEAD
+              echo "✅ CSV files committed and pushed successfully"
+            fi
+          else
+            echo "⚠️  No CSV files found in csv/ directory"
+            echo "This might mean the script didn't find any stocks or encountered an error"
+          fi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

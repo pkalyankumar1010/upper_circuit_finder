@@ -611,6 +611,7 @@ class NSEUpperCircuitFinder:
             # Create csv directory if it doesn't exist
             csv_dir = "csv"
             os.makedirs(csv_dir, exist_ok=True)
+            print(f"   📁 CSV directory: {os.path.abspath(csv_dir)}")
             
             # Generate filename with date
             date_str = datetime.now().strftime('%Y%m%d')
@@ -619,17 +620,41 @@ class NSEUpperCircuitFinder:
             
             # Save CSV file
             df.to_csv(filepath, index=False)
+            file_size = os.path.getsize(filepath)
             print(f"\n💾 Results saved to: {filepath}")
+            print(f"   File size: {file_size} bytes")
+            print(f"   Rows saved: {len(df)}")
+            
+            # Verify file was created
+            if os.path.exists(filepath):
+                print(f"   ✓ File verified: {filepath}")
+            else:
+                print(f"   ⚠️  Warning: File not found after saving!")
             
             # Try to commit and push to repo (works in GitHub Actions and local if git is configured)
             self.commit_and_push_csv(filepath, filename)
             
         except Exception as e:
             print(f"⚠️  Error saving CSV: {e}")
+            import traceback
+            print(f"   Traceback: {traceback.format_exc()}")
             print("   CSV file may still be saved locally")
     
     def commit_and_push_csv(self, filepath: str, filename: str):
         """Commit and push CSV file to the repository"""
+        # In GitHub Actions, let the workflow handle commit/push
+        # This is more reliable and avoids permission issues
+        if os.environ.get('GITHUB_ACTIONS'):
+            print(f"   ℹ️  Running in GitHub Actions - CSV file will be committed by workflow")
+            # Verify file exists
+            if os.path.exists(filepath):
+                file_size = os.path.getsize(filepath)
+                print(f"   ✓ CSV file created successfully ({file_size} bytes)")
+            else:
+                print(f"   ⚠️  Warning: CSV file not found at {filepath}")
+            return
+        
+        # For local runs, try to commit and push
         try:
             # Check if we're in a git repository
             result = subprocess.run(
@@ -643,84 +668,75 @@ class NSEUpperCircuitFinder:
                 print("   ℹ️  Not in a git repository, skipping commit/push")
                 return
             
-            # Check if file has changes
+            # Check if file exists and has changes
+            if not os.path.exists(filepath):
+                print(f"   ⚠️  CSV file not found: {filepath}")
+                return
+            
+            # Check git status - use diff to see if file changed
             result = subprocess.run(
+                ['git', 'diff', '--quiet', 'HEAD', filepath],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            # Also check if file is untracked
+            result_status = subprocess.run(
                 ['git', 'status', '--porcelain', filepath],
                 capture_output=True,
                 text=True,
                 timeout=5
             )
             
-            if not result.stdout.strip():
-                print(f"   ℹ️  {filename} already committed, skipping")
-                return
-            
-            # Configure git user (needed for GitHub Actions)
-            # Check if we're in GitHub Actions
-            if os.environ.get('GITHUB_ACTIONS'):
+            # If file is untracked or modified, commit it
+            if result.returncode != 0 or result_status.stdout.strip():
+                # Configure git user
                 subprocess.run(
-                    ['git', 'config', '--global', 'user.name', 'github-actions[bot]'],
+                    ['git', 'config', '--local', 'user.name', 'Upper Circuit Finder'],
                     capture_output=True,
                     timeout=5
                 )
                 subprocess.run(
-                    ['git', 'config', '--global', 'user.email', 'github-actions[bot]@users.noreply.github.com'],
+                    ['git', 'config', '--local', 'user.email', 'upper-circuit-finder@noreply.github.com'],
                     capture_output=True,
                     timeout=5
                 )
-            
-            # Add the CSV file
-            subprocess.run(
-                ['git', 'add', filepath],
-                check=True,
-                capture_output=True,
-                timeout=5
-            )
-            
-            # Commit the file
-            commit_message = f"Add upper circuit stocks CSV for {datetime.now().strftime('%Y-%m-%d')}"
-            subprocess.run(
-                ['git', 'commit', '-m', commit_message],
-                check=True,
-                capture_output=True,
-                timeout=5
-            )
-            
-            # Push to repository
-            # In GitHub Actions, we need to use a token with write permissions
-            if os.environ.get('GITHUB_ACTIONS'):
-                # Get the token from environment
-                token = os.environ.get('GITHUB_TOKEN', '')
-                if token:
-                    # Set up remote URL with token
-                    repo_url = os.environ.get('GITHUB_REPOSITORY', '')
-                    if repo_url:
-                        remote_url = f"https://{token}@github.com/{repo_url}.git"
-                        subprocess.run(
-                            ['git', 'remote', 'set-url', 'origin', remote_url],
-                            check=True,
-                            capture_output=True,
-                            timeout=5
-                        )
-            
-            # Push to origin
-            subprocess.run(
-                ['git', 'push', 'origin', 'HEAD'],
-                check=True,
-                capture_output=True,
-                timeout=30
-            )
-            
-            print(f"   ✅ CSV file committed and pushed to repository")
+                
+                # Add the CSV file
+                subprocess.run(
+                    ['git', 'add', filepath],
+                    check=True,
+                    capture_output=True,
+                    timeout=5
+                )
+                
+                # Commit the file
+                commit_message = f"Add upper circuit stocks CSV for {datetime.now().strftime('%Y-%m-%d')}"
+                result = subprocess.run(
+                    ['git', 'commit', '-m', commit_message],
+                    check=True,
+                    capture_output=True,
+                    timeout=5
+                )
+                
+                print(f"   ✅ CSV file committed locally")
+                print(f"   ℹ️  Run 'git push' to push to remote repository")
+            else:
+                print(f"   ℹ️  {filename} already committed (no changes detected)")
             
         except subprocess.CalledProcessError as e:
             print(f"   ⚠️  Git operation failed: {e}")
-            print("   CSV file is saved locally but not pushed to repo")
+            if e.stdout:
+                print(f"   stdout: {e.stdout.decode() if isinstance(e.stdout, bytes) else e.stdout}")
+            if e.stderr:
+                print(f"   stderr: {e.stderr.decode() if isinstance(e.stderr, bytes) else e.stderr}")
+            print("   CSV file is saved locally but not committed")
         except FileNotFoundError:
             print("   ℹ️  Git not found, skipping commit/push")
         except Exception as e:
-            print(f"   ⚠️  Error committing/pushing CSV: {e}")
-            print("   CSV file is saved locally but not pushed to repo")
+            print(f"   ⚠️  Error committing CSV: {e}")
+            print("   CSV file is saved locally but not committed")
     
     def create_github_issue(self):
         """Create a GitHub issue with the results"""

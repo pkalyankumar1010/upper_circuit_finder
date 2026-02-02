@@ -28,4 +28,4 @@ urllib3==2.6.3
 websockets==16.0
 yfinance==1.1.0
 # Optional but recommended for NSE API brotli decompression
-brotli>=1.0.0; python_version >= '3.7'
+brotli>=1.0.0;
