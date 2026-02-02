@@ -13,40 +13,83 @@ Quickstart
 1. Create a Python virtual environment and install dependencies:
 
 ```bash
+# upper_circuit_finder
+
+![CI](https://github.com/pkalyankumar1010/upper_circuit_finder/actions/workflows/upper_circuit_finder.yml/badge.svg)
+
+A fast, NSE-optimized scanner that finds Indian stocks hitting the upper circuit using NSE's "price band hitter" API. The script filters out stocks that hit an upper or lower circuit in the last 14 days, saves results to a CSV, and can optionally create a GitHub issue with the findings.
+
+**Highlights**
+- Uses NSE's price band hitter API to check only stocks that actually hit circuit (very fast)
+- Filters out stocks that hit circuits in the last 14 days to surface fresh momentum
+- Saves results to `csv/upper_circuit_stocks_<YYYYMMDD>.csv`
+- Optional GitHub issue creation when `GITHUB_TOKEN` is provided
+
+## Prerequisites
+- Python 3.10+ recommended
+- `requirements.txt` includes all Python dependencies (e.g., `yfinance`, `pandas`, `PyGithub`).
+
+## Installation
+1. Create and activate a virtual environment:
+
+```bash
 python -m venv .venv
-source .venv/bin/activate  # or .venv\\Scripts\\activate on Windows
+# macOS / Linux
+source .venv/bin/activate
+# Windows (PowerShell)
+.venv\Scripts\Activate.ps1
+# Windows (cmd)
+.venv\Scripts\activate
+```
+
+2. Install dependencies:
+
+```bash
 pip install -r requirements.txt
 ```
 
-2. Create an `.env` file (or set environment variables) with the following values:
+## Configuration (environment variables)
+Create an `.env` file in the repo root or set environment variables directly. Supported variables:
 
-- `GITHUB_TOKEN` (optional — required to create issues)
-- `GITHUB_USERNAME` (optional — default: pkalyankumar1010)
-- `GITHUB_REPO` (optional — default: upper_circuit_finder)
+- `GITHUB_TOKEN` — (optional) Personal access token or Actions token to allow automatic issue creation
+- `GITHUB_USERNAME` — (optional) GitHub user/organization for the repo (default: `pkalyankumar1010`)
+- `GITHUB_REPO` — (optional) Repository name (default: `upper_circuit_finder`)
 
-You can copy `.env.example` to start.
+If you plan to let the script commit CSVs locally, ensure `git` is available and configured. In CI (GitHub Actions), commits are handled by the workflow instead of the script.
 
-Running locally
+## Usage
+Run the NSE-optimized scanner:
 
 ```bash
 python upper_circuit_finder_nse.py
 ```
 
-GitHub Actions
+What the script does:
+- Visits NSE to obtain the list of price-band hitters (upper circuit candidates)
+- Filters to stocks within 1% of their circuit limit
+- Checks the last 14 trading days via Yahoo Finance to exclude symbols that already hit a circuit
+- Saves qualifying results to `csv/upper_circuit_stocks_<YYYYMMDD>.csv`
+- Optionally creates a GitHub issue summarizing the results when `GITHUB_TOKEN` is set
 
-This repo already includes a workflow at `.github/workflows/upper_circuit_finder.yml` that runs at 20:00 IST on weekdays and invokes `upper_circuit_finder_nse.py`.
+## Output
+- CSV files are saved under the `csv/` directory with the date in filename.
+- The script prints a table to the console and logs status messages during the run.
 
-If you want issues to be created, add a `GITHUB_TOKEN` (or personal access token) to the repository secrets.
+## GitHub Actions
+This repository includes a workflow that runs the scanner on a schedule (see `.github/workflows/upper_circuit_finder.yml`). To enable automatic issue creation from Actions, add a repository secret named `GITHUB_TOKEN` (or a personal access token with `repo` scope).
 
-Contributing
-- Please read `CONTRIBUTING.md` for guidance on opening issues and pull requests.
+## Troubleshooting & Notes
+- NSE may block automated requests (403/429). Options if you encounter blocking:
+	- Use a proxy or VPN
+	- Run from a different IP (avoid some cloud CI providers)
+	- Use `curl_cffi` (optional dependency) for better browser impersonation — the script falls back to `requests` if `curl_cffi` isn't available
+- If you see compressed or non-JSON responses, the script attempts decompression (brotli/gzip) and will print helpful debug information.
+- On Windows, the script configures stdout encoding for proper Unicode output.
 
-License
+## Contributing
+- Read [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
-This project is available under the MIT license — see `LICENSE`.
-
-Contact
-
-Open an issue or PR on this repository to report bugs or request features.
+## License
+This project is licensed under the MIT License — see [LICENSE](LICENSE) for details.
 
 Enjoy! 🚀

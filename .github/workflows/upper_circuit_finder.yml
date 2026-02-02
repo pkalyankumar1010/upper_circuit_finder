@@ -2,9 +2,9 @@ name: Upper Circuit Finder - Daily Scan
 
 on:
   schedule:
-    # Run daily at 20:00 UTC (08:00 PM UTC). GitHub Actions cron uses UTC.
-    # To run at 8:00 PM in a different timezone (e.g., IST), convert to UTC.
-      - cron: '30 14 * * 1-5'  # Daily at 20:00 IST (14:30 UTC)
+    # Run weekdays at 20:00 IST (8:00 PM IST). GitHub Actions cron uses UTC.
+    # 20:00 IST = 14:30 UTC, so schedule at 14:30 UTC (Mon-Fri).
+    - cron: '30 14 * * 1-5'  # Mon-Fri at 14:30 UTC (20:00 IST)
   workflow_dispatch:  # Allow manual trigger
 
 jobs:
