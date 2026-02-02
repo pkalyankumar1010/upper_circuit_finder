@@ -40,13 +40,3 @@ jobs:
           GITHUB_REPO: ${{ secrets.GITHUB_REPO || 'upper_circuit_finder' }}
         run: |
           python upper_circuit_finder_nse.py
-      
-      - name: Upload logs (if script fails)
-        if: failure()
-        uses: actions/upload-artifact@v4
-        with:
-          name: error-logs
-          path: |
-            *.log
-            *.txt
-          retention-days: 7
