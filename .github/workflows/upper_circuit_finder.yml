@@ -15,6 +15,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0  # Fetch all history for git operations
       
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -40,3 +43,13 @@ jobs:
           GITHUB_REPO: ${{ secrets.GITHUB_REPO || 'upper_circuit_finder' }}
         run: |
           python upper_circuit_finder_nse.py
+      
+      - name: Commit and push CSV files
+        if: always()  # Run even if previous step fails
+        run: |
+          git config --local user.email "github-actions[bot]@users.noreply.github.com"
+          git config --local user.name "github-actions[bot]"
+          git add csv/*.csv || echo "No CSV files to add"
+          git diff --staged --quiet && echo "No changes to commit" || (git commit -m "Auto-update: Add upper circuit stocks CSV [skip ci]" && git push) || echo "Push failed or no changes"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

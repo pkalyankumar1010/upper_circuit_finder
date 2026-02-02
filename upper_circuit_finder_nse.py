@@ -15,6 +15,7 @@ import requests
 from typing import List, Dict
 from github import Github, Auth
 from dotenv import load_dotenv
+import subprocess
 
 # Fix Unicode encoding for Windows console
 if sys.platform == 'win32':
@@ -601,10 +602,125 @@ class NSEUpperCircuitFinder:
         print(f"Total stocks found: {len(self.results)}")
         print("="*80)
         
-        # Save to CSV (disabled in CI workflow - commented out)
-        # filename = f"upper_circuit_stocks_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-        # df.to_csv(filename, index=False)
-        # print(f"\nResults saved to: {filename}")
+        # Save to CSV in csv folder
+        self.save_csv_to_repo(df)
+    
+    def save_csv_to_repo(self, df: pd.DataFrame):
+        """Save CSV file to csv folder and commit/push to repo"""
+        try:
+            # Create csv directory if it doesn't exist
+            csv_dir = "csv"
+            os.makedirs(csv_dir, exist_ok=True)
+            
+            # Generate filename with date
+            date_str = datetime.now().strftime('%Y%m%d')
+            filename = f"upper_circuit_stocks_{date_str}.csv"
+            filepath = os.path.join(csv_dir, filename)
+            
+            # Save CSV file
+            df.to_csv(filepath, index=False)
+            print(f"\n💾 Results saved to: {filepath}")
+            
+            # Try to commit and push to repo (works in GitHub Actions and local if git is configured)
+            self.commit_and_push_csv(filepath, filename)
+            
+        except Exception as e:
+            print(f"⚠️  Error saving CSV: {e}")
+            print("   CSV file may still be saved locally")
+    
+    def commit_and_push_csv(self, filepath: str, filename: str):
+        """Commit and push CSV file to the repository"""
+        try:
+            # Check if we're in a git repository
+            result = subprocess.run(
+                ['git', 'rev-parse', '--git-dir'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if result.returncode != 0:
+                print("   ℹ️  Not in a git repository, skipping commit/push")
+                return
+            
+            # Check if file has changes
+            result = subprocess.run(
+                ['git', 'status', '--porcelain', filepath],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            
+            if not result.stdout.strip():
+                print(f"   ℹ️  {filename} already committed, skipping")
+                return
+            
+            # Configure git user (needed for GitHub Actions)
+            # Check if we're in GitHub Actions
+            if os.environ.get('GITHUB_ACTIONS'):
+                subprocess.run(
+                    ['git', 'config', '--global', 'user.name', 'github-actions[bot]'],
+                    capture_output=True,
+                    timeout=5
+                )
+                subprocess.run(
+                    ['git', 'config', '--global', 'user.email', 'github-actions[bot]@users.noreply.github.com'],
+                    capture_output=True,
+                    timeout=5
+                )
+            
+            # Add the CSV file
+            subprocess.run(
+                ['git', 'add', filepath],
+                check=True,
+                capture_output=True,
+                timeout=5
+            )
+            
+            # Commit the file
+            commit_message = f"Add upper circuit stocks CSV for {datetime.now().strftime('%Y-%m-%d')}"
+            subprocess.run(
+                ['git', 'commit', '-m', commit_message],
+                check=True,
+                capture_output=True,
+                timeout=5
+            )
+            
+            # Push to repository
+            # In GitHub Actions, we need to use a token with write permissions
+            if os.environ.get('GITHUB_ACTIONS'):
+                # Get the token from environment
+                token = os.environ.get('GITHUB_TOKEN', '')
+                if token:
+                    # Set up remote URL with token
+                    repo_url = os.environ.get('GITHUB_REPOSITORY', '')
+                    if repo_url:
+                        remote_url = f"https://{token}@github.com/{repo_url}.git"
+                        subprocess.run(
+                            ['git', 'remote', 'set-url', 'origin', remote_url],
+                            check=True,
+                            capture_output=True,
+                            timeout=5
+                        )
+            
+            # Push to origin
+            subprocess.run(
+                ['git', 'push', 'origin', 'HEAD'],
+                check=True,
+                capture_output=True,
+                timeout=30
+            )
+            
+            print(f"   ✅ CSV file committed and pushed to repository")
+            
+        except subprocess.CalledProcessError as e:
+            print(f"   ⚠️  Git operation failed: {e}")
+            print("   CSV file is saved locally but not pushed to repo")
+        except FileNotFoundError:
+            print("   ℹ️  Git not found, skipping commit/push")
+        except Exception as e:
+            print(f"   ⚠️  Error committing/pushing CSV: {e}")
+            print("   CSV file is saved locally but not pushed to repo")
     
     def create_github_issue(self):
         """Create a GitHub issue with the results"""

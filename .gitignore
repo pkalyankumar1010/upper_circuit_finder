@@ -90,4 +90,6 @@ local_settings.py
 secrets.json
 
 # Ignore created CSV results (if you enable saving locally)
+# But allow CSV files in the csv/ folder to be committed
 *.csv
+!csv/*.csv
