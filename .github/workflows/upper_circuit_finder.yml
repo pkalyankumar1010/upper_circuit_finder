@@ -1,0 +1,52 @@
+name: Upper Circuit Finder - Daily Scan
+
+on:
+  schedule:
+    # Run at 3:30 PM IST (10:00 AM UTC) - after market closes
+    # Adjust timezone as needed
+    - cron: '0 10 * * 1-5'  # Monday to Friday at 10:00 UTC
+  workflow_dispatch:  # Allow manual trigger
+
+jobs:
+  scan-upper-circuits:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # Install brotli for NSE API response decompression (optional but recommended)
+          pip install brotli || pip install brotlicffi || echo "Brotli not available, will use fallback"
+          # curl_cffi is already in requirements.txt and helps bypass 403 errors
+          echo "curl_cffi installed for better browser mimicking"
+      
+      - name: Run Upper Circuit Finder
+        env:
+          # GitHub Actions automatically provides GITHUB_TOKEN
+          # You can override with a Personal Access Token if needed
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_USERNAME: ${{ secrets.GITHUB_USERNAME || 'pkalyankumar1010' }}
+          GITHUB_REPO: ${{ secrets.GITHUB_REPO || 'upper_circuit_finder' }}
+        run: |
+          python upper_circuit_finder_nse.py
+      
+      - name: Upload logs (if script fails)
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: error-logs
+          path: |
+            *.log
+            *.txt
+          retention-days: 7

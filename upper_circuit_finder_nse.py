@@ -6,6 +6,7 @@ RESULT: ~50-100x faster! (30 seconds vs 26 minutes)
 """
 
 import os
+import sys
 import yfinance as yf
 import pandas as pd
 from datetime import datetime, timedelta
@@ -14,6 +15,15 @@ import requests
 from typing import List, Dict
 from github import Github, Auth
 from dotenv import load_dotenv
+
+# Fix Unicode encoding for Windows console
+if sys.platform == 'win32':
+    try:
+        sys.stdout.reconfigure(encoding='utf-8')
+    except (AttributeError, ValueError):
+        # Python < 3.7 or reconfigure failed, try alternative
+        import codecs
+        sys.stdout = codecs.getwriter('utf-8')(sys.stdout.buffer, 'strict')
 
 # Load environment variables from a .env file (if present)
 load_dotenv()
@@ -43,28 +53,52 @@ class NSEUpperCircuitFinder:
         self.results = []
         self.nse_session = self._create_nse_session()
         
-    def _create_nse_session(self):
+    def _create_nse_session(self, use_curl_cffi=True):
         """Create a session that mimics a real browser"""
-        session = requests.Session()
+        # Try using curl_cffi first (better browser mimicking), fallback to requests
+        if use_curl_cffi:
+            try:
+                from curl_cffi import requests as curl_requests
+                print("   Using curl_cffi for better browser mimicking...")
+                # curl_cffi Session - impersonate is passed in get/post methods
+                session = curl_requests.Session()
+                # Mark that we're using curl_cffi
+                session._is_curl_cffi = True
+                session._impersonate = "chrome120"
+                return session
+            except (ImportError, Exception) as e:
+                print(f"   curl_cffi not available ({e}), using requests with enhanced headers...")
+                use_curl_cffi = False
         
-        # Complete browser headers - mimicking Chrome on Windows
+        # Fallback to standard requests with enhanced headers
+        session = requests.Session()
+        # Enhanced browser headers - mimicking latest Chrome on Windows
         session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': '*/*',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
             'Accept-Language': 'en-US,en;q=0.9',
-                'Accept-Encoding': 'gzip, deflate',
+            'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
-            'DNT': '1',
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
-            'Sec-Ch-Ua': '"Not_A Brand";v="8", "Chromium";v="120", "Google Chrome";v="120"',
-            'Sec-Ch-Ua-Mobile': '?0',
-            'Sec-Ch-Ua-Platform': '"Windows"',
-            'Cache-Control': 'no-cache',
-            'Pragma': 'no-cache',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none',
+            'Sec-Fetch-User': '?1',
+            'Cache-Control': 'max-age=0',
         })
+        session._is_curl_cffi = False
+        session._impersonate = None
         return session
+    
+    def _make_request(self, url, **kwargs):
+        """Helper method to make requests with curl_cffi impersonation if available"""
+        if hasattr(self.nse_session, '_is_curl_cffi') and self.nse_session._is_curl_cffi:
+            # Use curl_cffi with impersonation
+            impersonate = getattr(self.nse_session, '_impersonate', 'chrome120')
+            return self.nse_session.get(url, impersonate=impersonate, **kwargs)
+        else:
+            # Use standard requests
+            return self.nse_session.get(url, **kwargs)
     
     def get_upper_circuit_stocks_from_nse(self) -> List[Dict]:
         """
@@ -77,13 +111,52 @@ class NSEUpperCircuitFinder:
             print("🔍 Fetching upper circuit stocks from NSE...")
             print("   Simulating browser session...")
             
-            # Step 1: Visit homepage like a real browser
+            # Step 1: Visit homepage like a real browser with retry logic
             print("   Step 1: Visiting NSE homepage...")
             homepage_url = "https://www.nseindia.com"
-            homepage_response = self.nse_session.get(homepage_url, timeout=15)
             
-            if homepage_response.status_code != 200:
-                print(f"   ⚠ Homepage returned {homepage_response.status_code}")
+            # Retry logic for 403 errors
+            max_retries = 3
+            retry_delay = 2
+            homepage_response = None
+            
+            for attempt in range(max_retries):
+                try:
+                    homepage_response = self._make_request(homepage_url, timeout=15, allow_redirects=True)
+                    
+                    if homepage_response.status_code == 200:
+                        break
+                    elif homepage_response.status_code == 403:
+                        print(f"   ⚠ Attempt {attempt + 1}/{max_retries}: Homepage returned 403 (Forbidden)")
+                        if attempt < max_retries - 1:
+                            print(f"   → Waiting {retry_delay} seconds before retry...")
+                            time.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                            # Try recreating session with different headers
+                            self.nse_session = self._create_nse_session()
+                        else:
+                            print(f"   ❌ All retry attempts failed. NSE is blocking requests.")
+                            print(f"   💡 This is common in GitHub Actions due to IP-based blocking.")
+                            print(f"   💡 Solutions:")
+                            print(f"      1. Use a proxy service")
+                            print(f"      2. Run from a different IP (not GitHub Actions)")
+                            print(f"      3. Use NSE's official API if available")
+                            return []
+                    else:
+                        print(f"   ⚠ Homepage returned {homepage_response.status_code}")
+                        if attempt < max_retries - 1:
+                            time.sleep(retry_delay)
+                        else:
+                            return []
+                except Exception as e:
+                    print(f"   ⚠ Attempt {attempt + 1}/{max_retries} failed: {e}")
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                    else:
+                        return []
+            
+            if homepage_response is None or homepage_response.status_code != 200:
+                print(f"   ❌ Failed to access NSE homepage after {max_retries} attempts")
                 return []
             
             print(f"   ✓ Homepage loaded (Cookies received: {len(self.nse_session.cookies)})")
@@ -103,7 +176,7 @@ class NSEUpperCircuitFinder:
             })
             
             for market_url in market_urls:
-                market_response = self.nse_session.get(market_url, timeout=15)
+                market_response = self._make_request(market_url, timeout=15)
                 if market_response.status_code == 200:
                     print(f"   ✓ Accessed {market_url}")
                     market_page_url = market_url
@@ -118,16 +191,29 @@ class NSEUpperCircuitFinder:
             # Step 3: Now fetch price band hitters with proper referer
             print("   Step 3: Fetching price band hitters...")
             
-            # Debug: Show cookies
-            cookie_names = [cookie.name for cookie in self.nse_session.cookies]
-            print(f"   Cookies: {cookie_names}")
+            # Debug: Show cookies (handle both requests and curl_cffi cookie formats)
+            try:
+                if hasattr(self.nse_session.cookies, '__iter__'):
+                    cookie_names = []
+                    for cookie in self.nse_session.cookies:
+                        if hasattr(cookie, 'name'):
+                            cookie_names.append(cookie.name)
+                        elif isinstance(cookie, tuple):
+                            cookie_names.append(cookie[0])
+                        elif isinstance(cookie, str):
+                            cookie_names.append(cookie)
+                    print(f"   Cookies: {cookie_names}")
+                else:
+                    print(f"   Cookies: {len(self.nse_session.cookies)} cookie(s) received")
+            except Exception as e:
+                print(f"   Cookies: {len(self.nse_session.cookies)} cookie(s) received (debug: {e})")
             
             self.nse_session.headers.update({
                 'Referer': market_page_url,
                 'X-Requested-With': 'XMLHttpRequest',
             })
             
-            response = self.nse_session.get(NSE_PRICE_BAND_API, timeout=15)
+            response = self._make_request(NSE_PRICE_BAND_API, timeout=15)
             print(f"   → API Response Status: {response.status_code}")
             
             if response.status_code == 200:
@@ -287,6 +373,15 @@ class NSEUpperCircuitFinder:
             elif response.status_code == 401:
                 print(f"⚠ NSE API returned 401 (Unauthorized)")
                 print(f"   NSE has strict bot protection. Using fallback method...")
+                return []
+            elif response.status_code == 403:
+                print(f"⚠ NSE API returned 403 (Forbidden)")
+                print(f"   NSE is blocking automated requests from this IP.")
+                print(f"   This is common in GitHub Actions due to cloud IP blocking.")
+                print(f"   💡 Solutions:")
+                print(f"      1. Use a proxy/VPN service")
+                print(f"      2. Run from a different environment (not GitHub Actions)")
+                print(f"      3. Contact NSE for API access")
                 return []
             else:
                 print(f"⚠ NSE API returned status code: {response.status_code}")
