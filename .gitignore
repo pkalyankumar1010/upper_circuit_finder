@@ -88,3 +88,6 @@ local_settings.py
 
 # Secrets
 secrets.json
+
+# Ignore created CSV results (if you enable saving locally)
+*.csv
